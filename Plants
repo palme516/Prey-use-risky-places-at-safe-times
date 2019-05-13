@@ -1,0 +1,260 @@
+# set workspace 
+rm(list=ls())
+library(plyr); library(ggplot2); library(nlme); library(lme4); library(MuMIn)
+
+# load data 
+tot.dat <- read.csv("PlantsData.csv")
+tot.dat[is.na(tot.dat$Mass.g.),]$Mass.g. <- 0 #one mistake in data 
+
+# b/c consumption strips 1 x 1 m and plot strips 0.1 m x 2 m, standardized units tp g/m2
+tot.dat$Mass.g.m2 <- ifelse(tot.dat$ConsumptionOrPlot == "Plot", tot.dat$Mass.g./0.2, tot.dat$Mass.g./1) 
+
+# add treatments 
+sites <- read.csv("../Camera Trap Data/Experiment_SiteList.csv")
+sites <- sites[c("Site", "Treatment")]
+sites <- unique(sites); names(sites)[1] <- "Plot"
+tot.dat <- merge(tot.dat, sites)
+
+# plot data: overall plant growth 
+plot.dat <- tot.dat[tot.dat$ConsumptionOrPlot == "Plot",]
+plot.dat <- plot.dat[plot.dat$Functional.Group == "Current Year Herbaceous",]
+plot.dat <- plot.dat[c("Plot", "Sub.Plot.Strip", "Treatment", "Functional.Group", "Mass.g.m2")]
+plot.dat$Subplot <- droplevels(factor(paste(plot.dat$Plot, plot.dat$Sub.Plot.Strip)))
+
+# 1) whether or not to transform response 
+m0 <- lm(Mass.g.m2 ~ Treatment * Sub.Plot.Strip, data = plot.dat)
+m1 <- lm(log(Mass.g.m2) ~ Treatment * Sub.Plot.Strip, data = plot.dat)
+AIC(m0, m1); plot(m1)
+# --> log-transformed response variable fares better 
+
+# 2) selection for error structure + random effects 
+m2 <- lme(log(Mass.g.m2) ~ Treatment * Sub.Plot.Strip,  
+          random = ~1|Plot, data = plot.dat)
+m2.a <- lme(log(Mass.g.m2) ~ Treatment * Sub.Plot.Strip,  
+           random = ~1|Subplot, data = plot.dat)
+m2.b <- lme(log(Mass.g.m2) ~ Treatment * Sub.Plot.Strip,  
+            random = ~1|Plot/Subplot, data = plot.dat)
+  
+m3 <- lme(log(Mass.g.m2) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corCompSymm(form =~1|Plot), 
+          random = ~1|Plot, data = plot.dat) 
+m4 <- lme(log(Mass.g.m2) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corCompSymm(form =~1|Subplot), 
+          random = ~1|Subplot, data = plot.dat) 
+
+m5 <- lme(log(Mass.g.m2) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corCompSymm(form =~1|Plot/Subplot), 
+          random = ~1|Plot, data = plot.dat) 
+m5.a <- lme(log(Mass.g.m2) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corCompSymm(form =~1|Plot/Subplot), 
+          random = ~1|Plot/Subplot, data = plot.dat) 
+
+m6 <- lme(log(Mass.g.m2) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corSymm(form =~1|Plot), 
+          random = ~1|Plot, data = plot.dat, 
+          control = list(msMaxIter=2000, msMaxIter = 200, niterEM = 100, opt='optim'))
+m7 <- lme(log(Mass.g.m2) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corSymm(form =~1|Subplot), 
+          random = ~1|Subplot, data = plot.dat,
+          control = list(msMaxIter=2000, msMaxIter = 200, niterEM = 100, opt='optim')) 
+
+m8 <- lme(log(Mass.g.m2) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corSymm(form =~1|Plot/Subplot), 
+          random = ~1|Plot, data = plot.dat, 
+          control = list(msMaxIter=2000, msMaxIter = 200, niterEM = 100, opt='optim'))
+
+m8.a <- lme(log(Mass.g.m2) ~ Treatment * Sub.Plot.Strip, 
+            correlation = corSymm(form =~1|Plot/Subplot), 
+            random = ~1|Plot/Subplot, data = plot.dat, 
+            control = list(msMaxIter=2000, msMaxIter = 200, niterEM = 100, opt='optim')) 
+
+# 4) model selection for fixed effects: ranking by AICc using ML 
+options(na.action = "na.fail")
+
+m0 <- lme(log(Mass.g.m2) ~ Treatment * Sub.Plot.Strip, 
+          random = ~1|Plot,
+          data = plot.dat)
+ms1 <- dredge(m0, trace = TRUE, rank = "AICc", REML = FALSE)
+fmList <- get.models(ms1, subset = delta < 2)
+length(fmList)
+summary(model.avg(fmList))
+# --> no effect of predator treatment 
+# --> no overall effect of inside or outside 
+
+# plot data: plant community composition 
+
+# graminoids, legumes, non-leguminous forbs, pterophytes 
+
+spec.dat <- tot.dat[tot.dat$ConsumptionOrPlot=="Plot",]
+spec.dat$Subplot <- factor(paste(spec.dat$Plot, spec.dat$Sub.Plot.Strip))
+spec.dat <- ddply(spec.dat, .(Plot, Sub.Plot.Strip, Specific.Group, Treatment, Subplot),
+                  summarise, 
+                  Mass.g.m2 = sum(Mass.g.m2))
+newdf <- NULL
+newdf$Plot <- rep(unique(spec.dat$Plot), each=length(unique(spec.dat$Specific.Group)))
+newdf <- as.data.frame(newdf)
+newdf$Sub.Plot.Strip <- rep("Inside", 144)
+newdf$Specific.Group <- rep(unique(spec.dat$Specific.Group), length(unique(spec.dat$Plot)))
+newdf2 <- NULL
+newdf2$Plot <- rep(unique(spec.dat$Plot), each=length(unique(spec.dat$Specific.Group)))
+newdf2 <- as.data.frame(newdf2)
+newdf2$Sub.Plot.Strip <- rep("Outside", 144)
+newdf2$Specific.Group <- rep(unique(spec.dat$Specific.Group), length(unique(spec.dat$Plot)))
+newdf <- rbind(newdf, newdf2)
+
+specdat <- join(spec.dat, newdf, type="right")
+specdat$Treatment <- NULL
+specdat <- join(specdat, sites, type="left")
+specdat$Subplot <- factor(paste(specdat$Plot, specdat$Sub.Plot.Strip))
+specdat[is.na(specdat$Mass.g.m2),]$Mass.g.m2 <- 0
+
+options(na.action = "na.fail")
+
+# graminoids
+grams <- specdat[specdat$Specific.Group == "Graminoids",]
+grams$Mass.g.m2.1 <- grams$Mass.g.m2 + 0.01
+
+# select for transformation of resposne 
+m0 <- (lme(Mass.g.m2 ~ Treatment * Sub.Plot.Strip, random=~1|Plot, data = grams))
+m1 <- (lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, random=~1|Plot, data = grams))
+AIC(m0, m1); plot(m2)
+
+# 2) selection for error structure + random effects 
+m2 <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip,  
+            random = ~1|Subplot, data = grams)
+m2.a <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip,  
+            random = ~1|Plot/Subplot, data = grams)
+
+m3 <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corCompSymm(form =~1|Plot), 
+          random = ~1|Plot, data = grams) 
+m4 <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corCompSymm(form =~1|Subplot), 
+          random = ~1|Subplot, data = grams) 
+
+m5 <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corCompSymm(form =~1|Plot/Subplot), 
+          random = ~1|Plot, data = grams) 
+m5.a <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+            correlation = corCompSymm(form =~1|Plot/Subplot), 
+            random = ~1|Plot/Subplot, data = grams) 
+
+m6 <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corSymm(form =~1|Plot), 
+          random = ~1|Plot, data = grams) 
+m7 <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corSymm(form =~1|Subplot), 
+          random = ~1|Subplot, data = grams) 
+
+m8 <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corSymm(form =~1|Plot/Subplot), 
+          random = ~1|Plot, data = grams) 
+m8.a <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+            correlation = corSymm(form =~1|Plot/Subplot), 
+            random = ~1|Plot/Subplot, data = grams) 
+
+# drop fixed effects 
+ms1 <- dredge(m2, trace = TRUE, rank = "AICc", REML = FALSE)
+fmList <- get.models(ms1, subset = delta < 2)
+length(fmList)
+summary(model.avg(fmList))
+
+# legumes
+legs <- specdat[specdat$Specific.Group == "Legumes",]
+legs$Mass.g.m2.1 <- legs$Mass.g.m2+0.01
+
+# select for transformation of resposne 
+m0 <- (lme(Mass.g.m2 ~ Treatment * Sub.Plot.Strip, random=~1|Plot, data = legs))
+m1 <- (lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, random=~1|Plot, data = legs))
+AIC(m1, m2)
+plot(m2)
+
+# 2) selection for error structure + random effects 
+m2 <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip,  
+          random = ~1|Subplot, data = legs)
+m2.a <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip,  
+            random = ~1|Plot/Subplot, data = legs)
+
+m3 <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corCompSymm(form =~1|Plot), 
+          random = ~1|Plot, data = legs) 
+m4 <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corCompSymm(form =~1|Subplot), 
+          random = ~1|Subplot, data = legs) 
+
+m5 <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corCompSymm(form =~1|Plot/Subplot), 
+          random = ~1|Plot, data = legs) 
+m5.a <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+            correlation = corCompSymm(form =~1|Plot/Subplot), 
+            random = ~1|Plot/Subplot, data = legs) 
+
+m6 <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corSymm(form =~1|Plot), 
+          random = ~1|Plot, data = legs) 
+m7 <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corSymm(form =~1|Subplot), 
+          random = ~1|Subplot, data = legs) 
+
+m8 <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corSymm(form =~1|Plot/Subplot), 
+          random = ~1|Plot, data = legs) 
+m8.a <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+            correlation = corSymm(form =~1|Plot/Subplot), 
+            random = ~1|Plot/Subplot, data = legs) 
+
+# drop fixed effects 
+ms1 <- dredge(m2, trace = TRUE, rank = "AICc", REML = FALSE)
+fmList <- get.models(ms1, subset = delta < 2)
+length(fmList)
+summary(model.avg(fmList))
+
+# forbs
+fors <- specdat[specdat$Specific.Group == "Non-Leguminous Forbs",]
+fors$Mass.g.m2.1 <- fors$Mass.g.m2 + 0.01
+
+# select for transformation of resposne 
+m0 <- (lme(Mass.g.m2 ~ Treatment * Sub.Plot.Strip, random=~1|Plot, data = fors))
+m1 <- (lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, random=~1|Plot, data = fors))
+AIC(m0, m1)
+plot(m2)
+
+# 2) selection for error structure + random effects 
+m2 <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip,  
+          random = ~1|Subplot, data = fors)
+m2.a <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip,  
+            random = ~1|Plot/Subplot, data = fors)
+
+m3 <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corCompSymm(form =~1|Plot), 
+          random = ~1|Plot, data = fors) 
+m4 <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corCompSymm(form =~1|Subplot), 
+          random = ~1|Subplot, data = fors) 
+
+m5 <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corCompSymm(form =~1|Plot/Subplot), 
+          random = ~1|Plot, data = fors) 
+m5.a <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+            correlation = corCompSymm(form =~1|Plot/Subplot), 
+            random = ~1|Plot/Subplot, data = fors) 
+
+m6 <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corSymm(form =~1|Plot), 
+          random = ~1|Plot, data = fors) 
+m7 <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corSymm(form =~1|Subplot), 
+          random = ~1|Subplot, data = fors) 
+
+m8 <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+          correlation = corSymm(form =~1|Plot/Subplot), 
+          random = ~1|Plot, data = fors) 
+m8.a <- lme(log(Mass.g.m2.1) ~ Treatment * Sub.Plot.Strip, 
+            correlation = corSymm(form =~1|Plot/Subplot), 
+            random = ~1|Plot/Subplot, data = fors) 
+
+# drop fixed effects 
+ms1 <- dredge(m2, trace = TRUE, rank = "AICc", REML = FALSE)
+fmList <- get.models(ms1, subset = delta < 2)
+length(fmList)
+summary(model.avg(fmList))
