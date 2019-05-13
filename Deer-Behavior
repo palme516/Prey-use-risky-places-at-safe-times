@@ -1,0 +1,298 @@
+
+# set workspace
+rm(list=ls())
+library(ggplot2); library(plyr); library(lme4); library(lubridate); library(overlap)
+library(glmmTMB); library(MuMIn); library(nlme); library(MASS)
+
+# load, format, clean data 
+dat <- read.csv("ExperimentalPhotos.csv")
+dat <- dat[c("Site", "DateTime", "Species", "Antlers", "Count", "Behavior")]
+dat$DateTime <- strptime(dat$DateTime, "%Y-%m-%d %H:%M:%S")
+unique(dat$Antlers)
+levels(dat$Antlers)[levels(dat$Antlers) == "Yes (small)"] <- "Yes"
+levels(dat$Antlers)[levels(dat$Antlers) == "Yes (small); No"] <- "No; Yes"
+levels(dat$Antlers)[levels(dat$Antlers) == "Yes "] <- "Yes"
+levels(dat$Antlers)[levels(dat$Antlers) == "Yes; No"] <- "No; Yes"
+levels(dat$Antlers)[levels(dat$Antlers) == "No; JUVENILE; Yes"] <- "No; Yes; JUVENILE"
+
+# thin data to unique sightings 
+dat <- dat[order(dat$Site, dat$Species, dat$DateTime),]
+dat$index <- paste(dat$Site, dat$Species)
+dat$delta.time.mins <- unlist(tapply(dat$DateTime, INDEX = dat$index,
+                                     FUN = function(x) c(0, `units<-`(diff(x), "mins"))))
+
+# selects most animals, most sexes, most behaviors seen; takes min (first) time 
+sitespp <- unique(dat$index)
+findat <- NULL
+
+for(i in 1:length((sitespp))){
+  site <- dat[dat$index == sitespp[i],]
+  site$chunk1 <- ifelse(site$delta.time.mins < 1, NA, "NEW")
+  site$chunk2 <- NA
+  count <- 1
+  for(j in 1:nrow(site)){
+    if(is.na(site$chunk1[j])){
+      site$chunk2[j] <- count
+    }
+    else{
+      count <- count + 1
+      site$chunk2[j] <- count
+    }
+   } 
+  prepdat <- NULL
+  for(k in 1:count){
+    chunk <- site[site$chunk2 == k,]
+    prepdat$Site[k] <- as.character(unique(chunk$Site))
+    prepdat$Species[k] <- as.character(unique(chunk$Species))
+    prepdat$DateTime[k] <- as.character(min(chunk$DateTime))
+    prepdat$Count[k] <- max(chunk$Count)
+    prepdat$Sex[k] <- as.character(paste(unique(chunk$Antlers), collapse=" "))
+    prepdat$Beh[k] <- as.character(paste(unique(chunk$Behavior), collapse=" "))
+    prepdat$Duration[k] <- as.character(max(chunk$DateTime) - min(chunk$DateTime))
+  }
+  prepdat <- as.data.frame(prepdat)
+  findat <- rbind(findat, prepdat) 
+}
+head(findat)
+
+# fix sex and behaviors 
+findat$Male <- NA; findat$Female <- NA; findat$Juv <- NULL
+for(i in 1:nrow(findat)){
+  findat$Male[i] <- ifelse(grepl('Yes', findat$Sex[i]) == T, 1, 0)
+  findat$Female[i] <- ifelse(grepl('No', findat$Sex[i]) == T, 1, 0)
+  findat$Juv[i] <- ifelse(grepl('JUVENILE', findat$Sex[i]) == T, 1, 0)
+  findat
+}
+findat$Sex <- NULL
+
+findat$Feed <- NA; findat$Watch <- NULL; findat$Walk <- NULL; findat$Other <- NULL 
+for(i in 1:nrow(findat)){
+  findat$Feed[i] <- ifelse(grepl('feed', findat$Beh[i]) == T, 1, 0)
+  findat$Watch[i] <- ifelse(grepl('watch', findat$Beh[i]) == T, 1, 0)
+  findat$Walk[i] <- ifelse(grepl('walk', findat$Beh[i]) == T, 1, 0)
+  findat$Other[i] <- ifelse(grepl('scratch', findat$Beh[i]) == T | 
+                              grepl('defecate', findat$Beh[i]) == T |
+                              grepl('rest', findat$Beh[i]) == T | 
+                              grepl('groom', findat$Beh[i]) == T, 1, 0)
+}
+findat$Beh <- NULL
+
+# add whether site experimental or control
+sites <- read.csv("Experiment_SiteList.csv")
+sites <- sites[c("Site", "Treatment")]
+sites <- unique(sites)
+findat <- merge(findat, sites, by="Site")
+
+# just for deer 
+deer <- findat[findat$Species == "Deer",]
+deer$occur <- 1 #independent sightings
+
+# expand so one line of data per individual (for by-sex analyses) 
+deer.count.males <- deer[rep(seq_len(dim(deer)[1]), deer$Male),]
+deer.count.males$sex <- "Male"; deer.count.males$age <- "Adult"
+deer.count.females <- deer[rep(seq_len(dim(deer)[1]), deer$Female),]
+deer.count.females$sex <- "Female"; deer.count.females$age <- "Adult"
+deer.count.juveniles <- deer[rep(seq_len(dim(deer)[1]), deer$Juv),]
+deer.count.juveniles$sex <- "Unknown"; deer.count.juveniles$age <- "Juvenile"
+deer.count <- rbind(deer.count.males, deer.count.females, deer.count.juveniles)
+deer.count$Count <- 1; deer.count$occur <- NULL
+deer.count$Male <- NULL; deer.count$Female <- NULL; deer.count$Juv <- NULL
+
+# daily activity plots 
+deer$time <- (hour(deer$DateTime)*60 + minute(deer$DateTime))/(24*60)
+deer$radtime <- deer$time * 2 * pi
+densityPlot(deer$radtime, rug=TRUE)
+overlapPlot(deer[deer$Treatment=="Urine",]$radtime, deer[deer$Treatment=="Control",]$radtime, main="")
+legend('topleft', c("Urine", "Control"), lty=c(1,2), col=c(1,4), bty='n')
+
+
+##############
+## analyses ##
+##############
+
+# add in a time variable 
+deer$DateTime <- strptime(deer$DateTime, "%Y-%m-%d %H:%M:%S")
+deer$time <- as.numeric(deer$DateTime - min(deer$DateTime))
+
+test <- deer
+test$fam <- factor(ifelse(test$Male == 1 & test$Female == 0 & test$Juv == 0, "Male", 
+            ifelse(test$Female == 1 & test$Male == 0 & test$Juv == 0, "Female",
+            ifelse(test$Juv == 1 & test$Male == 0 & test$Female == 0, "Juvenile",
+            ifelse(test$Male == 1 & test$Female == 1 & test$Juv == 0, "Male Female",
+            ifelse(test$Male == 1 & test$Juv == 1 & test$Female == 0, "Male Juvenile",
+            ifelse(test$Female == 1 & test$Juv == 1 & test$Male == 0, "Female Juvenile", 
+            ifelse(test$Male == 1 & test$Female == 1 & test$Juv == 1, "Male Female Juvenile",  
+                   "Error"))))))))
+test <- test[!test$fam == "Male Juvenile",] #only one case, makes models rank-definicient
+
+
+## total counts of deer ## 
+
+m0 <- glmer(Count ~ Treatment * fam + (1|Site), 
+              family="poisson", data = test)
+m1 <- glmer(Count ~ Treatment * Male + Treatment * Female + Treatment * Juv + (1|Site), 
+            family = "poisson",  data = test)
+AIC(m0, m1)
+plot(m1)
+
+# random effect 
+m2 <- glmer(Count ~ Treatment * Male + Treatment * Female + Treatment * Juv + (1|Site/time), 
+              family="poisson",
+              data = test) 
+AIC(m1, m2)
+
+# temporal autocorrelation structure 
+m3 <- glmmTMB(Count ~ Treatment * Male + Treatment * Female + Treatment * Juv + (1|Site) +  
+             ar1(time-1|Site),
+             family="poisson",
+             data = test)
+m4 <- glmmTMB(Count ~ Treatment * Male + Treatment * Female + Treatment * Juv + (1|Site/time) +  
+             ar1(time-1|Site),
+             family="poisson",
+             data = test)
+AIC(m1, m2)
+
+# random effect + error structure --> BUT CAN'T GET AICs; DO NOT RUN
+m0 <- glmmPQL(Count ~ Treatment * Male + Treatment * Female + Treatment * Juv,  
+              random=~1|Site,
+              family="poisson",
+              data = test)
+m1 <- glmmPQL(Count ~ Treatment * Male + Treatment * Female + Treatment * Juv,  
+              random=~1|Site,
+              family="poisson",
+              correlation=corAR1(form = ~1|Site),
+              data = test)
+m3 <- glmmPQL(Count ~ Treatment * Male + Treatment * Female + Treatment * Juv,  
+              random=~1|Site,
+              family="poisson",
+              correlation=corCAR1(form = ~1|Site),
+              data = test)
+m4 <- glmmPQL(Count ~ Treatment * Male + Treatment * Female + Treatment * Juv,  
+              random=~1|Site,
+              family="poisson",
+              correlation=corCompSymm(form = ~1|Site),
+              data = test)
+m5 <- glmmPQL(Count ~ Treatment * Male + Treatment * Female + Treatment * Juv,  
+              random=~1|Site,
+              family="poisson",
+              correlation=corSymm(form = ~1|Site),
+              data = test)
+AIC(m0, m1, m2, m3, m4)
+
+# model selection
+m1 <- glmer(Count ~ Treatment * Male + Treatment * Female + Treatment * Juv + (1|Site), 
+            family = "poisson",  data = test)
+
+options(na.action = "na.fail")
+ms1 <- dredge(m1, trace = TRUE, rank = "AICc", REML = FALSE)
+fmList <- get.models(ms1, subset = delta < 2)
+length(fmList)
+summary(model.avg(fmList))
+
+
+## duration of visit ## 
+
+test$DurationFix <- test$Duration + 0.01
+m0 <- lme(Duration ~ Treatment * Male + Treatment * Female + Treatment * Juv, 
+          random = ~1|Site, data=test)
+m1 <- lme(log(DurationFix) ~ Treatment * Male + Treatment * Female + Treatment * Juv,
+          random = ~1|Site, data=test)
+plot(m1); summary(m0)
+AIC(m0, m1)
+
+# random effects + error structure 
+m2 <- lme(log(DurationFix) ~ Treatment * Male + Treatment * Female + Treatment * Juv, 
+          random = ~1|Site/time, data = test) 
+AIC(m1, m2)
+
+# temporal autocorrelation structure 
+m3 <- lme(log(DurationFix) ~ Treatment * Male + Treatment * Female + Treatment * Juv,  
+          random = ~1|Site, data = test,
+          correlation = corAR1(form = ~time-1|Site))
+             
+m4 <- lme(log(DurationFix) ~ Treatment * Male + Treatment * Female + Treatment * Juv,  
+          random = ~1|Site/time, data = test,
+          correlation = corAR1(form = ~time-1|Site))
+AIC(m1,m3)
+
+# model selection
+ms1 <- dredge(m1, trace = TRUE, rank = "AICc", REML = FALSE)
+fmList <- get.models(ms1, subset = delta < 2)
+length(fmList)
+summary(model.avg(fmList))
+
+
+## foraging behaviors ##
+m0 <- glmer(Feed ~ Treatment * Male + Treatment * Female + Treatment * Juv + (1|Site), 
+            control=glmerControl(optimizer="bobyqa", optCtrl=list(maxfun=2e5)),
+            family = "binomial",  data = test)
+
+m1 <- glmer(Feed ~ Treatment * Male + Treatment * Female + Treatment * Juv + (1|Site/time), 
+            control=glmerControl(optimizer="bobyqa", optCtrl=list(maxfun=2e5)),
+            family = "binomial",  data = test)
+AIC(m0, m1)
+
+# temporal autocorrelation structure 
+m3 <- glmmTMB(Feed ~ Treatment * Male + Treatment * Female + Treatment * Juv + (1|Site) +  
+                ar1(time-1|Site),
+              family="poisson",
+              data = test)
+m4 <- glmmTMB(Feed ~ Treatment * Male + Treatment * Female + Treatment * Juv + (1|Site/time) +  
+                ar1(time-1|Site),
+              family="poisson",
+              data = test)
+
+# model selection
+ms1 <- dredge(m0, trace = TRUE, rank = "AICc", REML = FALSE)
+fmList <- get.models(ms1, subset = delta < 2)
+length(fmList)
+summary(model.avg(fmList))
+
+
+## vigilance behaviors ## 
+m0 <- glmer(Watch ~ Treatment * Male + Treatment * Female + Treatment * Juv + (1|Site),
+            control=glmerControl(optimizer="bobyqa", optCtrl=list(maxfun=2e5)),
+            family = "binomial",  data = test)
+
+m1 <- glmer(Watch ~ Treatment * Male + Treatment * Female + Treatment * Juv + (1|Site/time), 
+            control=glmerControl(optimizer="bobyqa", optCtrl=list(maxfun=2e5)),
+            family = "binomial",  data = test)
+AIC(m0, m1)
+
+# temporal autocorrelation structure 
+m3 <- glmmTMB(Watch ~ Treatment * Male + Treatment * Female + Treatment * Juv + (1|Site) +  
+                ar1(time-1|Site),
+              family="poisson",
+              data = test)
+m4 <- glmmTMB(Watch ~ Treatment * Male + Treatment * Female + Treatment * Juv + (1|Site/time) +  
+                ar1(time-1|Site),
+              family="poisson",
+              data = test)
+
+# model selection
+ms1 <- dredge(m0, trace = TRUE, rank = "AICc", REML = FALSE)
+fmList <- get.models(ms1, subset = delta < 2)
+length(fmList)
+summary(model.avg(fmList))
+
+
+# group size? 
+deer$group <- factor(ifelse(deer$Count > 1, 1, 0))
+summary(glmer(group ~ Treatment + (1|Site), family = binomial, data=deer))
+
+
+# deer activity patterns: quantifying overlap
+# (is there a difference between treatment and control?)
+(deer.treat <- overlapEst(deer[deer$Treatment=="Urine",]$radtime, deer[deer$Treatment=="Control",]$radtime, type="Dhat4")) 
+# == 0.7929
+
+# bootstrapping overlap + confidence intervals 
+# == fit a kernel density to the original data then draw random simulated observations from this distribution
+urineboot <- resample(deer[deer$Treatment=="Urine",]$radtime, 1000)
+controlboot <- resample(deer[deer$Treatment=="Control",]$radtime, 1000)
+treatboot <- bootEst(urineboot, controlboot, type="Dhat4")
+(BSmean <- mean(treatboot)) #bootstrapped mean overlap
+# == 0.7981
+
+bootCI(deer.treat, treatboot) #use 'basic0' output as your CI
+# == 0.7552550-0.8381831
