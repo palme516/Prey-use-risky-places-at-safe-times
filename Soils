@@ -1,0 +1,208 @@
+# set workspace
+rm(list=ls())
+library(nlme)
+
+# load data 
+dat <- read.csv("ProbesForR.csv")
+
+# format data 
+dat$Cd <- NULL; dat$Pb <- NULL; dat$B <- NULL; dat$NH4.N <- NULL; dat$NO3.N <- NULL
+dat$subplot.id <- factor(paste(dat$Site, dat$In.Out, sep="_"))
+
+dat$CaCent <- scale(dat$Ca) 
+dat$CaCent.1 <- dat$CaCent + abs(min(dat$CaCent)) + 0.01
+dat$CaCent.1 <- log(dat$CaCent.1) 
+
+## linear models
+
+# Ca2+: response 
+m0 <- lme(CaCent ~ Treatment * In.Out, random=~1|Site, data=dat)
+m1 <- lme(CaCent.1 ~ Treatment * In.Out, random=~1|Site, data=dat)
+m2 <- lme(log(Ca) ~ Treatment * In.Out, random=~1|Site, data=dat)
+m3 <- lme(Ca ~ Treatment * In.Out, random=~1|Site, data=dat)
+AIC(m0, m1, m2, m3)
+plot(m2) #--> model with just log transformation works best 
+
+# fit random effects 
+m2 <- lme(log(Ca) ~ Treatment * In.Out,  
+          random = ~1|Site, data = dat)
+m2.a <- lme(log(Ca) ~ Treatment * In.Out,  
+            random = ~1|subplot.id, data = dat)
+m2.b <- lme(log(Ca) ~ Treatment * In.Out,  
+            random = ~1|Site/subplot.id, data = dat)
+
+m3 <- lme(log(Ca) ~ Treatment * In.Out, 
+          correlation = corCompSymm(form =~1|Site), 
+          random = ~1|Site, data = dat) 
+m4 <- lme(log(Ca) ~ Treatment * In.Out, 
+          correlation = corCompSymm(form =~1|subplot.id), 
+          random = ~1|subplot.id, data = dat) 
+
+m5 <- lme(log(Ca) ~ Treatment * In.Out, 
+          correlation = corCompSymm(form =~1|Site/subplot.id), 
+          random = ~1|Site, data = dat) 
+m5.a <- lme(log(Ca) ~ Treatment * In.Out, 
+            correlation = corCompSymm(form =~1|Site/subplot.id), 
+            random = ~1|Site/subplot.id, data = dat) 
+
+m6 <- lme(log(Ca) ~ Treatment * In.Out, 
+          correlation = corSymm(form =~1|Site), 
+          random = ~1|Site, data = dat, 
+          control = list(msMaxIter=2000, msMaxIter = 200, niterEM = 100, opt='optim'))
+m7 <- lme(log(Ca) ~ Treatment * In.Out, 
+          correlation = corSymm(form =~1|subplot.id), 
+          random = ~1|subplot.id, data = dat,
+          control = list(msMaxIter=2000, msMaxIter = 200, niterEM = 100, opt='optim')) 
+
+m8 <- lme(log(Ca) ~ Treatment * In.Out, 
+          correlation = corSymm(form =~1|Site/subplot.id), 
+          random = ~1|Site, data = dat, 
+          control = list(msMaxIter=2000, msMaxIter = 200, niterEM = 100, opt='optim'))
+
+m8.a <- lme(log(Ca) ~ Treatment * In.Out, 
+            correlation = corSymm(form =~1|Site/subplot.id), 
+            random = ~1|Site/subplot.id, data = dat, 
+            control = list(msMaxIter=2000, msMaxIter = 200, niterEM = 100, opt='optim')) 
+
+ms1 <- dredge(m2, trace = TRUE, rank = "AICc", REML = FALSE)
+fmList <- get.models(ms1, subset = delta < 2)
+length(fmList)
+summary(model.avg(fmList))
+
+# Mg
+m2 <- lme(log(Mg) ~ Treatment * In.Out,  
+          random = ~1|Site, data = dat)
+m2.a <- lme(log(Mg) ~ Treatment * In.Out,  
+            random = ~1|subplot.id, data = dat)
+m2.b <- lme(log(Mg) ~ Treatment * In.Out,  
+            random = ~1|Site/subplot.id, data = dat)
+
+m3 <- lme(log(Mg) ~ Treatment * In.Out, 
+          correlation = corCompSymm(form =~1|Site), 
+          random = ~1|Site, data = dat) 
+m4 <- lme(log(Mg) ~ Treatment * In.Out, 
+          correlation = corCompSymm(form =~1|subplot.id), 
+          random = ~1|subplot.id, data = dat) 
+
+m5 <- lme(log(Mg) ~ Treatment * In.Out, 
+          correlation = corCompSymm(form =~1|Site/subplot.id), 
+          random = ~1|Site, data = dat) 
+m5.a <- lme(log(Mg) ~ Treatment * In.Out, 
+            correlation = corCompSymm(form =~1|Site/subplot.id), 
+            random = ~1|Site/subplot.id, data = dat) 
+
+m6 <- lme(log(Mg) ~ Treatment * In.Out, 
+          correlation = corSymm(form =~1|Site), 
+          random = ~1|Site, data = dat, 
+          control = list(msMaxIter=2000, msMaxIter = 200, niterEM = 100, opt='optim'))
+m7 <- lme(log(Mg) ~ Treatment * In.Out, 
+          correlation = corSymm(form =~1|subplot.id), 
+          random = ~1|subplot.id, data = dat,
+          control = list(msMaxIter=2000, msMaxIter = 200, niterEM = 100, opt='optim')) 
+
+m8 <- lme(log(Mg) ~ Treatment * In.Out, 
+          correlation = corSymm(form =~1|Site/subplot.id), 
+          random = ~1|Site, data = dat, 
+          control = list(msMaxIter=2000, msMaxIter = 200, niterEM = 100, opt='optim'))
+
+m8.a <- lme(log(Mg) ~ Treatment * In.Out, 
+            correlation = corSymm(form =~1|Site/subplot.id), 
+            random = ~1|Site/subplot.id, data = dat, 
+            control = list(msMaxIter=2000, msMaxIter = 200, niterEM = 100, opt='optim')) 
+
+ms1 <- dredge(m2, trace = TRUE, rank = "AICc", REML = FALSE)
+fmList <- get.models(ms1, subset = delta < 2)
+length(fmList)
+summary(model.avg(fmList))
+
+# K
+m2 <- lme(log(K) ~ Treatment * In.Out,  
+          random = ~1|Site, data = dat)
+m2.a <- lme(log(K) ~ Treatment * In.Out,  
+            random = ~1|subplot.id, data = dat)
+m2.b <- lme(log(K) ~ Treatment * In.Out,  
+            random = ~1|Site/subplot.id, data = dat)
+
+m3 <- lme(log(K) ~ Treatment * In.Out, 
+          correlation = corCompSymm(form =~1|Site), 
+          random = ~1|Site, data = dat) 
+m4 <- lme(log(K) ~ Treatment * In.Out, 
+          correlation = corCompSymm(form =~1|subplot.id), 
+          random = ~1|subplot.id, data = dat) 
+
+m5 <- lme(log(K) ~ Treatment * In.Out, 
+          correlation = corCompSymm(form =~1|Site/subplot.id), 
+          random = ~1|Site, data = dat) 
+m5.a <- lme(log(K) ~ Treatment * In.Out, 
+            correlation = corCompSymm(form =~1|Site/subplot.id), 
+            random = ~1|Site/subplot.id, data = dat) 
+
+m6 <- lme(log(K) ~ Treatment * In.Out, 
+          correlation = corSymm(form =~1|Site), 
+          random = ~1|Site, data = dat, 
+          control = list(msMaxIter=2000, msMaxIter = 200, niterEM = 100, opt='optim'))
+m7 <- lme(log(K) ~ Treatment * In.Out, 
+          correlation = corSymm(form =~1|subplot.id), 
+          random = ~1|subplot.id, data = dat,
+          control = list(msMaxIter=2000, msMaxIter = 200, niterEM = 100, opt='optim')) 
+
+m8 <- lme(log(K) ~ Treatment * In.Out, 
+          correlation = corSymm(form =~1|Site/subplot.id), 
+          random = ~1|Site, data = dat, 
+          control = list(msMaxIter=2000, msMaxIter = 200, niterEM = 100, opt='optim'))
+
+m8.a <- lme(log(K) ~ Treatment * In.Out, 
+            correlation = corSymm(form =~1|Site/subplot.id), 
+            random = ~1|Site/subplot.id, data = dat, 
+            control = list(msMaxIter=2000, msMaxIter = 200, niterEM = 100, opt='optim')) 
+
+ms1 <- dredge(m2, trace = TRUE, rank = "AICc", REML = FALSE)
+fmList <- get.models(ms1, subset = delta < 2)
+length(fmList)
+summary(model.avg(fmList))
+
+# P
+m2 <- lme(log(P) ~ Treatment * In.Out,  
+          random = ~1|Site, data = dat)
+m2.a <- lme(log(P) ~ Treatment * In.Out,  
+            random = ~1|subplot.id, data = dat)
+m2.b <- lme(log(P) ~ Treatment * In.Out,  
+            random = ~1|Site/subplot.id, data = dat)
+
+m3 <- lme(log(P) ~ Treatment * In.Out, 
+          correlation = corCompSymm(form =~1|Site), 
+          random = ~1|Site, data = dat) 
+m4 <- lme(log(P) ~ Treatment * In.Out, 
+          correlation = corCompSymm(form =~1|subplot.id), 
+          random = ~1|subplot.id, data = dat) 
+
+m5 <- lme(log(P) ~ Treatment * In.Out, 
+          correlation = corCompSymm(form =~1|Site/subplot.id), 
+          random = ~1|Site, data = dat) 
+m5.a <- lme(log(P) ~ Treatment * In.Out, 
+            correlation = corCompSymm(form =~1|Site/subplot.id), 
+            random = ~1|Site/subplot.id, data = dat) 
+
+m6 <- lme(log(P) ~ Treatment * In.Out, 
+          correlation = corSymm(form =~1|Site), 
+          random = ~1|Site, data = dat, 
+          control = list(msMaxIter=2000, msMaxIter = 200, niterEM = 100, opt='optim'))
+m7 <- lme(log(P) ~ Treatment * In.Out, 
+          correlation = corSymm(form =~1|subplot.id), 
+          random = ~1|subplot.id, data = dat,
+          control = list(msMaxIter=2000, msMaxIter = 200, niterEM = 100, opt='optim')) 
+
+m8 <- lme(log(P) ~ Treatment * In.Out, 
+          correlation = corSymm(form =~1|Site/subplot.id), 
+          random = ~1|Site, data = dat, 
+          control = list(msMaxIter=2000, msMaxIter = 200, niterEM = 100, opt='optim'))
+
+m8.a <- lme(log(P) ~ Treatment * In.Out, 
+            correlation = corSymm(form =~1|Site/subplot.id), 
+            random = ~1|Site/subplot.id, data = dat, 
+            control = list(msMaxIter=2000, msMaxIter = 200, niterEM = 100, opt='optim')) 
+
+ms1 <- dredge(m2, trace = TRUE, rank = "AICc", REML = FALSE)
+fmList <- get.models(ms1, subset = delta < 2)
+length(fmList)
+summary(model.avg(fmList))
