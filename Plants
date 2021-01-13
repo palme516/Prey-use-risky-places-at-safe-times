@@ -4,7 +4,6 @@ library(plyr); library(ggplot2); library(nlme); library(lme4); library(MuMIn)
 
 # load data 
 tot.dat <- read.csv("PlantsData.csv")
-tot.dat[is.na(tot.dat$Mass.g.),]$Mass.g. <- 0 #one mistake in data 
 
 # b/c consumption strips 1 x 1 m and plot strips 0.1 m x 2 m, standardized units tp g/m2
 tot.dat$Mass.g.m2 <- ifelse(tot.dat$ConsumptionOrPlot == "Plot", tot.dat$Mass.g./0.2, tot.dat$Mass.g./1) 
@@ -81,15 +80,13 @@ summary(model.avg(fmList))
 # --> no effect of predator treatment 
 # --> no overall effect of inside or outside 
 
-# plot data: plant community composition 
 
 # graminoids, legumes, non-leguminous forbs, pterophytes 
 
 spec.dat <- tot.dat[tot.dat$ConsumptionOrPlot=="Plot",]
 spec.dat$Subplot <- factor(paste(spec.dat$Plot, spec.dat$Sub.Plot.Strip))
 spec.dat <- ddply(spec.dat, .(Plot, Sub.Plot.Strip, Specific.Group, Treatment, Subplot),
-                  summarise, 
-                  Mass.g.m2 = sum(Mass.g.m2))
+                  summarise, Mass.g.m2 = sum(Mass.g.m2))
 newdf <- NULL
 newdf$Plot <- rep(unique(spec.dat$Plot), each=length(unique(spec.dat$Specific.Group)))
 newdf <- as.data.frame(newdf)
@@ -107,8 +104,6 @@ specdat$Treatment <- NULL
 specdat <- join(specdat, sites, type="left")
 specdat$Subplot <- factor(paste(specdat$Plot, specdat$Sub.Plot.Strip))
 specdat[is.na(specdat$Mass.g.m2),]$Mass.g.m2 <- 0
-
-options(na.action = "na.fail")
 
 # graminoids
 grams <- specdat[specdat$Specific.Group == "Graminoids",]
