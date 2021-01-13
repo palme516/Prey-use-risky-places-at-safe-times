@@ -3,12 +3,12 @@ rm(list=ls())
 library(nlme)
 
 # load data 
-dat <- read.csv("ProbesForR.csv")
+dat <- read.csv("SoilsData.csv")
 
 # format data 
-dat$Cd <- NULL; dat$Pb <- NULL; dat$B <- NULL; dat$NH4.N <- NULL; dat$NO3.N <- NULL
 dat$subplot.id <- factor(paste(dat$Site, dat$In.Out, sep="_"))
 
+# which is best way to normalize data? 
 dat$CaCent <- scale(dat$Ca) 
 dat$CaCent.1 <- dat$CaCent + abs(min(dat$CaCent)) + 0.01
 dat$CaCent.1 <- log(dat$CaCent.1) 
@@ -64,6 +64,7 @@ m8.a <- lme(log(Ca) ~ Treatment * In.Out,
             random = ~1|Site/subplot.id, data = dat, 
             control = list(msMaxIter=2000, msMaxIter = 200, niterEM = 100, opt='optim')) 
 
+options(na.action = "na.fail")
 ms1 <- dredge(m2, trace = TRUE, rank = "AICc", REML = FALSE)
 fmList <- get.models(ms1, subset = delta < 2)
 length(fmList)
