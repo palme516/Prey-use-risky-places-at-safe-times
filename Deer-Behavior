@@ -1,29 +1,20 @@
-
 # set workspace
 rm(list=ls())
 library(ggplot2); library(plyr); library(lme4); library(lubridate); library(overlap)
 library(glmmTMB); library(MuMIn); library(nlme); library(MASS)
 
 # load, format, clean data 
-dat <- read.csv("ExperimentalPhotos.csv")
-dat <- dat[c("Site", "DateTime", "Species", "Antlers", "Count", "Behavior")]
+dat <- read.csv("Deer-Behavior.csv")
 dat$DateTime <- strptime(dat$DateTime, "%Y-%m-%d %H:%M:%S")
-unique(dat$Antlers)
-levels(dat$Antlers)[levels(dat$Antlers) == "Yes (small)"] <- "Yes"
-levels(dat$Antlers)[levels(dat$Antlers) == "Yes (small); No"] <- "No; Yes"
-levels(dat$Antlers)[levels(dat$Antlers) == "Yes "] <- "Yes"
-levels(dat$Antlers)[levels(dat$Antlers) == "Yes; No"] <- "No; Yes"
-levels(dat$Antlers)[levels(dat$Antlers) == "No; JUVENILE; Yes"] <- "No; Yes; JUVENILE"
 
-# thin data to unique sightings 
+# remove dupicate sightings 
 dat <- dat[order(dat$Site, dat$Species, dat$DateTime),]
 dat$index <- paste(dat$Site, dat$Species)
-dat$delta.time.mins <- unlist(tapply(dat$DateTime, INDEX = dat$index,
-                                     FUN = function(x) c(0, `units<-`(diff(x), "mins"))))
+dat$delta.time.mins <- unlist(tapply(dat$DateTime, INDEX = dat$index, FUN = function(x) c(0, `units<-`(diff(x), "mins"))))
 
-# selects most animals, most sexes, most behaviors seen; takes min (first) time 
+# selects most animals, most sexes, most behaviors seen in each encounter but take minutes from first sighting
 sitespp <- unique(dat$index)
-findat <- NULL
+deer <- NULL
 
 for(i in 1:length((sitespp))){
   site <- dat[dat$index == sitespp[i],]
@@ -51,40 +42,36 @@ for(i in 1:length((sitespp))){
     prepdat$Duration[k] <- as.character(max(chunk$DateTime) - min(chunk$DateTime))
   }
   prepdat <- as.data.frame(prepdat)
-  findat <- rbind(findat, prepdat) 
+  deer <- rbind(deer, prepdat) 
 }
-head(findat)
+head(deer)
 
 # fix sex and behaviors 
-findat$Male <- NA; findat$Female <- NA; findat$Juv <- NULL
-for(i in 1:nrow(findat)){
-  findat$Male[i] <- ifelse(grepl('Yes', findat$Sex[i]) == T, 1, 0)
-  findat$Female[i] <- ifelse(grepl('No', findat$Sex[i]) == T, 1, 0)
-  findat$Juv[i] <- ifelse(grepl('JUVENILE', findat$Sex[i]) == T, 1, 0)
-  findat
+deer$Male <- NA; deer$Female <- NA; deer$Juv <- NULL
+for(i in 1:nrow(deer)){
+  deer$Male[i] <- ifelse(grepl('Yes', deer$Sex[i]) == T, 1, 0)
+  deer$Female[i] <- ifelse(grepl('No', deer$Sex[i]) == T, 1, 0)
+  deer$Juv[i] <- ifelse(grepl('JUVENILE', deer$Sex[i]) == T, 1, 0)
 }
-findat$Sex <- NULL
+deer$Sex <- NULL
 
-findat$Feed <- NA; findat$Watch <- NULL; findat$Walk <- NULL; findat$Other <- NULL 
+deer$Feed <- NA; deer$Watch <- NULL; deer$Walk <- NULL; deer$Other <- NULL 
 for(i in 1:nrow(findat)){
-  findat$Feed[i] <- ifelse(grepl('feed', findat$Beh[i]) == T, 1, 0)
-  findat$Watch[i] <- ifelse(grepl('watch', findat$Beh[i]) == T, 1, 0)
-  findat$Walk[i] <- ifelse(grepl('walk', findat$Beh[i]) == T, 1, 0)
-  findat$Other[i] <- ifelse(grepl('scratch', findat$Beh[i]) == T | 
-                              grepl('defecate', findat$Beh[i]) == T |
-                              grepl('rest', findat$Beh[i]) == T | 
-                              grepl('groom', findat$Beh[i]) == T, 1, 0)
+  deer$Feed[i] <- ifelse(grepl('feed', deer$Beh[i]) == T, 1, 0)
+  deer$Watch[i] <- ifelse(grepl('watch', deer$Beh[i]) == T, 1, 0)
+  deer$Walk[i] <- ifelse(grepl('walk', deer$Beh[i]) == T, 1, 0)
+  deer$Other[i] <- ifelse(grepl('scratch', deer$Beh[i]) == T | 
+                              grepl('defecate', deer$Beh[i]) == T |
+                              grepl('rest', deer$Beh[i]) == T | 
+                              grepl('groom', deer$Beh[i]) == T, 1, 0)
 }
-findat$Beh <- NULL
+deer$Beh <- NULL
 
 # add whether site experimental or control
 sites <- read.csv("Experiment_SiteList.csv")
 sites <- sites[c("Site", "Treatment")]
 sites <- unique(sites)
-findat <- merge(findat, sites, by="Site")
-
-# just for deer 
-deer <- findat[findat$Species == "Deer",]
+deer <- merge(deer, sites, by="Site")
 deer$occur <- 1 #independent sightings
 
 # expand so one line of data per individual (for by-sex analyses) 
@@ -127,7 +114,6 @@ test <- test[!test$fam == "Male Juvenile",] #only one case, makes models rank-de
 
 
 ## total counts of deer ## 
-
 m0 <- glmer(Count ~ Treatment * fam + (1|Site), 
               family="poisson", data = test)
 m1 <- glmer(Count ~ Treatment * Male + Treatment * Female + Treatment * Juv + (1|Site), 
@@ -152,7 +138,7 @@ m4 <- glmmTMB(Count ~ Treatment * Male + Treatment * Female + Treatment * Juv + 
              data = test)
 AIC(m1, m2)
 
-# random effect + error structure --> BUT CAN'T GET AICs; DO NOT RUN
+# random effect + error structure 
 m0 <- glmmPQL(Count ~ Treatment * Male + Treatment * Female + Treatment * Juv,  
               random=~1|Site,
               family="poisson",
@@ -191,7 +177,6 @@ summary(model.avg(fmList))
 
 
 ## duration of visit ## 
-
 test$DurationFix <- test$Duration + 0.01
 m0 <- lme(Duration ~ Treatment * Male + Treatment * Female + Treatment * Juv, 
           random = ~1|Site, data=test)
@@ -276,12 +261,7 @@ length(fmList)
 summary(model.avg(fmList))
 
 
-# group size? 
-deer$group <- factor(ifelse(deer$Count > 1, 1, 0))
-summary(glmer(group ~ Treatment + (1|Site), family = binomial, data=deer))
-
-
-# deer activity patterns: quantifying overlap
+## deer activity patterns: quantifying overlap
 # (is there a difference between treatment and control?)
 (deer.treat <- overlapEst(deer[deer$Treatment=="Urine",]$radtime, deer[deer$Treatment=="Control",]$radtime, type="Dhat4")) 
 # == 0.7929
